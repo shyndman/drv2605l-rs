@@ -1,20 +1,20 @@
 #![no_std]
 
 mod registers;
-use embedded_hal::blocking::i2c::{Write, WriteRead};
+use embedded_hal_async::i2c::I2c;
 use registers::{
-    AutoCalibrationCompensationBackEmfReg, AutoCalibrationCompensationReg, BrakeTimeOffsetReg,
-    Control1Reg, Control2Reg, Control3Reg, Control4Reg, Control5Reg, FeedbackControlReg, GoReg,
-    LibrarySelectionReg, ModeReg, OverdriveClampReg, OverdriveTimeOffsetReg, RatedVoltageReg,
-    RealTimePlaybackInputReg, Register, StatusReg, SustainTimeOffsetNegativeReg,
-    SustainTimeOffsetPositiveReg, Waveform0Reg,
+    AutoCalibrationCompensationBackEmfReg, AutoCalibrationCompensationReg,
+    BrakeTimeOffsetReg, Control1Reg, Control2Reg, Control3Reg, Control4Reg, Control5Reg,
+    FeedbackControlReg, GoReg, LibrarySelectionReg, ModeReg, OverdriveClampReg,
+    OverdriveTimeOffsetReg, RatedVoltageReg, RealTimePlaybackInputReg, Register, StatusReg,
+    SustainTimeOffsetNegativeReg, SustainTimeOffsetPositiveReg, Waveform0Reg,
 };
 pub use registers::{Effect, Library};
 
 /// A Texas instruments Drv2605 haptic motor driver for LRA and ERM motors
 pub struct Drv2605l<I2C, E>
 where
-    I2C: WriteRead<Error = E> + Write<Error = E>,
+    I2C: I2c<Error = E>,
 {
     i2c: I2C,
     lra: bool,
@@ -23,16 +23,20 @@ where
 #[allow(unused)]
 impl<I2C, E> Drv2605l<I2C, E>
 where
-    I2C: WriteRead<Error = E> + Write<Error = E>,
+    I2C: I2c<Error = E>,
 {
     /// Returns a calibrated Drv2605l device configured to standby mode for
     /// power savings. Closed loop is hardcoded for all motors and modes except
     /// ERM motors in rom mode where open loop is automatically enabled.
     ///
     /// Use a `set_mode` and `set_go` to trigger a vibration.
-    pub fn new(i2c: I2C, calibration: Calibration, lra: bool) -> Result<Self, DrvError> {
+    pub async fn new(
+        i2c: I2C,
+        calibration: Calibration,
+        lra: bool,
+    ) -> Result<Self, DrvError> {
         let mut haptic = Self { i2c, lra };
-        haptic.check_id(7)?;
+        haptic.check_id(7).await?;
 
         // todo reset so registers are defaulted. Currently timing out..  need a
         // solution for delaying and retrying. Currently we send default values
@@ -42,12 +46,12 @@ where
         match calibration {
             // device will get c/alibration values out of the otp if the otp bit is set
             Calibration::Otp => {
-                if !haptic.is_otp()? {
+                if !haptic.is_otp().await? {
                     return Err(DrvError::OTPNotProgrammed);
                 }
             }
             // load up previously calibrated values
-            Calibration::Load(c) => haptic.set_calibration(c)?,
+            Calibration::Load(c) => haptic.set_calibration(c).await?,
             Calibration::Auto(c) => {
                 let mut feedback: FeedbackControlReg = Default::default();
                 let mut ctrl2: Control2Reg = Default::default();
@@ -69,25 +73,25 @@ where
                 ctrl4.set_zc_det_time(c.lra_zc_det_time);
                 ctrl1.set_drive_time(c.drive_time);
 
-                haptic.write(feedback)?;
-                haptic.write(ctrl2)?;
-                haptic.write(ctrl4)?;
-                haptic.write(rated)?;
-                haptic.write(clamp)?;
-                haptic.write(ctrl1)?;
-                haptic.calibrate()?;
+                haptic.write(feedback).await?;
+                haptic.write(ctrl2).await?;
+                haptic.write(ctrl4).await?;
+                haptic.write(rated).await?;
+                haptic.write(clamp).await?;
+                haptic.write(ctrl1).await?;
+                haptic.calibrate().await?;
             }
         }
 
-        haptic.set_standby(true)?;
+        haptic.set_standby(true).await?;
 
         Ok(haptic)
     }
 
-    pub fn set_mode(&mut self, mode: Mode) -> Result<(), DrvError> {
-        let mut m: ModeReg = self.read()?;
+    pub async fn set_mode(&mut self, mode: Mode) -> Result<(), DrvError> {
+        let mut m: ModeReg = self.read().await?;
 
-        let mut ctrl3: Control3Reg = self.read()?;
+        let mut ctrl3: Control3Reg = self.read().await?;
 
         match mode {
             Mode::Pwm => {
@@ -96,40 +100,42 @@ where
                     ctrl3.set_erm_open_loop(false);
                 }
                 ctrl3.set_n_pwm_analog(false);
-                self.write(ctrl3)?;
+                self.write(ctrl3).await?;
 
                 m.set_mode(registers::Mode::PwmInputAndAnalogInput as u8);
-                self.write(m)
+                self.write(m).await
             }
             Mode::Rom(library, options) => {
-                let mut ctrl5: Control5Reg = self.read()?;
+                let mut ctrl5: Control5Reg = self.read().await?;
                 ctrl5.set_playback_interval(options.decrease_playback_interval);
-                self.write(ctrl5)?;
+                self.write(ctrl5).await?;
 
                 let mut overdrive = OverdriveTimeOffsetReg(options.overdrive_time_offset);
-                self.write(overdrive)?;
+                self.write(overdrive).await?;
 
-                let mut sustain_p = SustainTimeOffsetPositiveReg(options.sustain_positive_offset);
-                self.write(sustain_p)?;
+                let mut sustain_p =
+                    SustainTimeOffsetPositiveReg(options.sustain_positive_offset);
+                self.write(sustain_p).await?;
 
-                let mut sustain_n = SustainTimeOffsetNegativeReg(options.sustain_negative_offset);
-                self.write(sustain_n)?;
+                let mut sustain_n =
+                    SustainTimeOffsetNegativeReg(options.sustain_negative_offset);
+                self.write(sustain_n).await?;
 
                 let mut brake = BrakeTimeOffsetReg(options.brake_time_offset);
-                self.write(brake)?;
+                self.write(brake).await?;
 
                 // erm requires open loop mode
                 if !self.lra {
                     ctrl3.set_erm_open_loop(true);
                 }
-                self.write(ctrl3)?;
+                self.write(ctrl3).await?;
 
-                let mut lib: LibrarySelectionReg = self.read()?;
+                let mut lib: LibrarySelectionReg = self.read().await?;
                 lib.set_library_selection(library as u8);
-                self.write(lib)?;
+                self.write(lib).await?;
 
                 m.set_mode(registers::Mode::InternalTrigger as u8);
-                self.write(m)
+                self.write(m).await
             }
             Mode::Analog => {
                 // unset in case coming from rom mode
@@ -137,10 +143,10 @@ where
                     ctrl3.set_erm_open_loop(false);
                 }
                 ctrl3.set_n_pwm_analog(true);
-                self.write(ctrl3)?;
+                self.write(ctrl3).await?;
 
                 m.set_mode(registers::Mode::PwmInputAndAnalogInput as u8);
-                self.write(m)
+                self.write(m).await
             }
             Mode::RealTimePlayback => {
                 // We won't need to unset as no other modes use this bit
@@ -149,10 +155,10 @@ where
                 if !self.lra {
                     ctrl3.set_erm_open_loop(false);
                 }
-                self.write(ctrl3)?;
+                self.write(ctrl3).await?;
 
                 m.set_mode(registers::Mode::RealTimePlayback as u8);
-                self.write(m)
+                self.write(m).await
             }
         }
     }
@@ -160,7 +166,7 @@ where
     /// Sets up to 8 Effects to play in order when `set_go` is called. Stops
     /// playing early if `Effect::None` is used.
     // todo dont hardcode to 8, pass slice? but then need to assert <=8
-    pub fn set_rom(&mut self, roms: &[Effect; 8]) -> Result<(), DrvError> {
+    pub async fn set_rom(&mut self, roms: &[Effect; 8]) -> Result<(), DrvError> {
         let buf: [u8; 9] = [
             Waveform0Reg::ADDRESS,
             roms[0].into(),
@@ -174,66 +180,68 @@ where
         ];
         self.i2c
             .write(ADDRESS, &buf)
+            .await
             .map_err(|_| DrvError::ConnectionError)
     }
 
     /// Set a single `Effect` into rom storage during rom mode when `set_go` is
     /// called
-    pub fn set_rom_single(&mut self, rom: Effect) -> Result<(), DrvError> {
+    pub async fn set_rom_single(&mut self, rom: Effect) -> Result<(), DrvError> {
         let buf: [u8; 3] = [Waveform0Reg::ADDRESS, rom.into(), Effect::Stop.into()];
         self.i2c
             .write(ADDRESS, &buf)
+            .await
             .map_err(|_| DrvError::ConnectionError)
     }
 
     /// Change the duty cycle for rtp mode
-    pub fn set_rtp(&mut self, duty: u8) -> Result<(), DrvError> {
+    pub async fn set_rtp(&mut self, duty: u8) -> Result<(), DrvError> {
         let rtp = RealTimePlaybackInputReg(duty);
-        self.write(rtp)
+        self.write(rtp).await
     }
 
     /// Get the current rtp duty cycle
-    pub fn rtp(&mut self) -> Result<u8, DrvError> {
-        let rtp: RealTimePlaybackInputReg = self.read()?;
+    pub async fn rtp(&mut self) -> Result<u8, DrvError> {
+        let rtp: RealTimePlaybackInputReg = self.read().await?;
 
         Ok(rtp.value())
     }
 
     /// Trigger a GO for whatever mode is enabled
-    pub fn set_go(&mut self) -> Result<(), DrvError> {
-        let mut go: GoReg = self.read()?;
+    pub async fn set_go(&mut self) -> Result<(), DrvError> {
+        let mut go: GoReg = self.read().await?;
 
         go.set_go(true);
-        self.write(go)
+        self.write(go).await
     }
 
     /// Get the go bit. For some modes the go bit can be polled to see when it
     /// clears indicating a waveform has completed playback.
-    pub fn go(&mut self) -> Result<bool, DrvError> {
-        Ok(self.read::<GoReg>()?.go())
+    pub async fn go(&mut self) -> Result<bool, DrvError> {
+        Ok(self.read::<GoReg>().await?.go())
     }
 
     /// Enabling standby goes into a low power state but maintains all mode
     /// configuration
-    pub fn set_standby(&mut self, enable: bool) -> Result<(), DrvError> {
-        let mut mode: ModeReg = self.read()?;
+    pub async fn set_standby(&mut self, enable: bool) -> Result<(), DrvError> {
+        let mut mode: ModeReg = self.read().await?;
         mode.set_standby(enable);
-        self.write(mode)
+        self.write(mode).await
     }
 
     /// Get the status bits
-    pub fn status(&mut self) -> Result<u8, DrvError> {
-        let status: StatusReg = self.read()?;
+    pub async fn status(&mut self) -> Result<u8, DrvError> {
+        let status: StatusReg = self.read().await?;
         Ok(status.value())
     }
 
     /// Get the LoadParams that were loaded at startup or calculated via
     /// Calibration
-    pub fn calibration(&mut self) -> Result<LoadParams, DrvError> {
-        let feedback: FeedbackControlReg = self.read()?;
+    pub async fn calibration(&mut self) -> Result<LoadParams, DrvError> {
+        let feedback: FeedbackControlReg = self.read().await?;
 
-        let compenstation: AutoCalibrationCompensationReg = self.read()?;
-        let back_emf: AutoCalibrationCompensationBackEmfReg = self.read()?;
+        let compenstation: AutoCalibrationCompensationReg = self.read().await?;
+        let back_emf: AutoCalibrationCompensationBackEmfReg = self.read().await?;
 
         Ok(LoadParams {
             back_emf_gain: feedback.bemf_gain(),
@@ -245,29 +253,31 @@ where
     /* Private calls */
 
     /// Write `value` to `register`
-    fn write<REG>(&mut self, register: REG) -> Result<(), DrvError>
+    async fn write<REG>(&mut self, register: REG) -> Result<(), DrvError>
     where
         REG: Register,
     {
         self.i2c
             .write(ADDRESS, &[REG::ADDRESS, register.value()])
+            .await
             .map_err(|_| DrvError::ConnectionError)
     }
 
     /// Read the register
-    fn read<REG>(&mut self) -> Result<REG, DrvError>
+    async fn read<REG>(&mut self) -> Result<REG, DrvError>
     where
         REG: Register + From<u8>,
     {
         let mut buf = [0u8; 1];
         self.i2c
             .write_read(ADDRESS, &[REG::ADDRESS], &mut buf)
+            .await
             .map_err(|_| DrvError::ConnectionError)?;
         Ok(buf[0].into())
     }
 
-    fn check_id(&mut self, id: u8) -> Result<(), DrvError> {
-        let reg = StatusReg(self.status()?);
+    async fn check_id(&mut self, id: u8) -> Result<(), DrvError> {
+        let reg = StatusReg(self.status().await?);
         if reg.device_id() != id {
             return Err(DrvError::WrongDeviceId);
         }
@@ -278,42 +288,42 @@ where
     // performs the equivalent operation of power cycling the device. Any
     // playback operations are immediately interrupted, and all registers are
     // reset to the default values.
-    fn reset(&mut self) -> Result<(), DrvError> {
+    async fn reset(&mut self) -> Result<(), DrvError> {
         let mut mode = ModeReg::default();
         mode.set_dev_reset(true);
-        self.write(mode)?;
+        self.write(mode).await?;
 
-        while self.read::<ModeReg>()?.dev_reset() {}
+        while self.read::<ModeReg>().await?.dev_reset() {}
 
         Ok(())
     }
 
     /// Send calibration `LoadParams`
-    fn set_calibration(&mut self, load: LoadParams) -> Result<(), DrvError> {
-        let mut fbcr: FeedbackControlReg = self.read()?;
+    async fn set_calibration(&mut self, load: LoadParams) -> Result<(), DrvError> {
+        let mut fbcr: FeedbackControlReg = self.read().await?;
         fbcr.set_bemf_gain(load.back_emf_gain);
-        self.write(fbcr)?;
+        self.write(fbcr).await?;
 
         let auto_cal_comp = AutoCalibrationCompensationReg(load.compenstation);
-        self.write(auto_cal_comp)?;
+        self.write(auto_cal_comp).await?;
 
         let back_emf = AutoCalibrationCompensationBackEmfReg(load.back_emf);
-        self.write(back_emf)
+        self.write(back_emf).await
     }
 
     /// Run diagnostics
-    fn diagnostics(&mut self) -> Result<(), DrvError> {
-        let mut mode: ModeReg = self.read()?;
+    async fn diagnostics(&mut self) -> Result<(), DrvError> {
+        let mut mode: ModeReg = self.read().await?;
         mode.set_standby(false);
         mode.set_mode(registers::Mode::Diagnostics as u8);
-        self.write(mode)?;
+        self.write(mode).await?;
 
-        self.set_go()?;
+        self.set_go().await?;
 
         //todo timeout
-        while self.read::<GoReg>()?.go() {}
+        while self.read::<GoReg>().await?.go() {}
 
-        let reg = StatusReg(self.status()?);
+        let reg = StatusReg(self.status().await?);
         if reg.diagnostic_result() {
             return Err(DrvError::DeviceDiagnosticFailed);
         }
@@ -322,28 +332,28 @@ where
     }
 
     /// Run auto calibration which and return the resulting LoadParams
-    fn calibrate(&mut self) -> Result<LoadParams, DrvError> {
-        let mut mode: ModeReg = self.read()?;
+    async fn calibrate(&mut self) -> Result<LoadParams, DrvError> {
+        let mut mode: ModeReg = self.read().await?;
         mode.set_standby(false);
         mode.set_mode(registers::Mode::AutoCalibration as u8);
-        self.write(mode)?;
+        self.write(mode).await?;
 
-        self.set_go()?;
+        self.set_go().await?;
 
         //todo timeout
-        while self.read::<GoReg>()?.go() {}
+        while self.read::<GoReg>().await?.go() {}
 
-        let reg = StatusReg(self.status()?);
+        let reg = StatusReg(self.status().await?);
         if reg.diagnostic_result() {
             return Err(DrvError::CalibrationFailed);
         }
 
-        self.calibration()
+        self.calibration().await
     }
 
     /// Check if the device's LoadParams have been set in the nonvolatile memory
-    fn is_otp(&mut self) -> Result<bool, DrvError> {
-        let reg4: Control4Reg = self.read()?;
+    async fn is_otp(&mut self) -> Result<bool, DrvError> {
+        let reg4: Control4Reg = self.read().await?;
         Ok(reg4.otp_status())
     }
 }
