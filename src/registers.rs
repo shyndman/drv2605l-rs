@@ -58,6 +58,7 @@ impl Register for StatusReg {
 }
 
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub enum Mode {
     /// Waveforms are fired by setting the GO bit in register 0x0C.
     InternalTrigger = 0,
@@ -288,6 +289,7 @@ impl Default for ModeReg {
 /// waveforms, but is tuned to work for different motors so it is important to
 /// choose the correct library for your motor characteristics
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub enum Library {
     /// No library selected
     Empty = 0,
@@ -487,6 +489,7 @@ impl From<Effect> for u8 {
 /// and `set_rom_single` function and triggered using the `set_go` function
 #[allow(unused)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub enum Effect {
     /// No effect, or Stop playing
     Stop,

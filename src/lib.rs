@@ -361,6 +361,7 @@ where
 /// Possible runtime errors
 #[allow(unused)]
 #[derive(Debug)]
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub enum DrvError {
     WrongMotorType,
     WrongDeviceId,
@@ -376,6 +377,7 @@ pub enum DrvError {
 const ADDRESS: u8 = 0x5a;
 
 /// Selection of calibration options required for initial device construction
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub enum Calibration {
     /// Many calibration params can be defaulted, and maybe the entire thing for
     /// some motors. Required params for LRA motors especially though should
@@ -394,6 +396,7 @@ pub enum Calibration {
 
 /// Previously computed calibration parameters. Can be fetched after calibration
 /// and hardcoded during construction instead of auto calibration.
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub struct LoadParams {
     /// Auto-Calibration Compensation Result
     pub compenstation: u8,
@@ -407,6 +410,7 @@ pub struct LoadParams {
 /// really need to be computed from the drv2605l and motor datasheets,
 /// especially for LRA motors
 #[non_exhaustive]
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub struct CalibrationParams {
     /// Required: Datasheet 8.5.2.1 Rated Voltage Programming
     pub rated_voltage: u8,
@@ -450,6 +454,7 @@ impl Default for CalibrationParams {
 /// Advanced configuration for rom waveforms offering time stretching (or time
 /// shrinking) to the built in waveforms
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub struct RomParams {
     /// Overdrive Time Offset (ms) = overdrive_time * playback_interval
     pub overdrive_time_offset: u8,
@@ -480,6 +485,7 @@ impl Default for RomParams {
 /// Selection of modes of device operation, some of which take their
 /// configuration via the enum
 #[derive(Debug, Clone, Copy)]
+#[cfg_attr(feature = "defmt", derive(::defmt::Format))]
 pub enum Mode {
     /// Select the Immersion TS2200 library that matches your motor
     /// characteristic. For ERM Motors, open loop operation will be enabled as

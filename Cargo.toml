@@ -8,12 +8,17 @@ description = "A platform agnostic driver for the drv2605l haptic driver"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 repository = "https://github.com/jacobrosenthal/drv2605l-rs"
-edition = "2018"
+edition = "2021"
+
+[features]
+default = ["defmt"]
+defmt = ["dep:defmt"]
 
 [dependencies]
+bitfield = "~0.14"
+defmt = {version = "0.3.5", optional = true}
 embedded-hal = {package = "embedded-hal", version = "1.0.0-rc.1"}
 embedded-hal-async = "1.0.0-rc.1"
-bitfield = "~0.14"
 
 [dev-dependencies]
 metro_m0 = "0.9.0"
